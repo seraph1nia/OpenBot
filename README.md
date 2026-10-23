@@ -1,3 +1,190 @@
+# Local OpenBot with a ChatGPT subscription
+
+This checkout customizes OpenBot commit `bd4dc94943a9d62aefd05e5e99073ba58919c9c6`.
+The installation below is the default for this checkout. The original upstream README follows it
+for reference; its API-key and host-process quickstart does not describe this installation.
+Dependency versions are recorded in [local/versions.json](local/versions.json), the upstream
+`bun.lock`, and `agent-mastra/package-lock.json`. Mastra uses the published SDK subpath exports,
+not an unrelated coding-agent application. Builds use the pinned deployer's verified
+`MASTRA_BUILD_SKIP_INSTALL=true` setting and run its compiled server against the locked `npm ci`
+dependency tree, avoiding a second floating dependency install.
+
+Prerequisites: rootful Docker Engine with Compose, Python 3, Node 22+ and npm. Bun 1.4.3 is needed
+only for source tests. Allow at least 4 CPUs, 12 GiB **available** Docker memory and 40 GiB disk
+for Intelligence, plus OpenBot and browser/build overhead. This Linux amd64 host passes the CLI
+checks. Official local Intelligence accepts rootful Linux but its supported preview is macOS with
+Docker Desktop; see [the current platform boundary](https://docs.copilotkit.ai/intelligence/self-hosting-local).
+A CopilotKit account on the no-cost Developer plan qualifies for a renewable 30-day evaluation
+license. ChatGPT Plus/Pro access and device-code login enabled in ChatGPT security settings are
+needed for subscription inference. Account/model eligibility is checked with an actual generation.
+
+Run these from the repository root:
+
+```bash
+python3 scripts/local/init.py
+# Operator browser sign-in and agreement acceptance, in your own terminal:
+npx --yes copilotkit@4.30.0 login
+npx --yes copilotkit@4.30.0 local accept-terms
+./scripts/local/bootstrap-intelligence.sh
+./scripts/local/login.sh
+./scripts/local/start.sh
+./scripts/local/verify.sh
+```
+
+Open **http://localhost:3010**. The default Bot is **Personal Assistant** (`general-assistant`),
+registered as `remote-mastra` at `http://mastra:4213`, agent ID `openbot`. API and UI share the
+same container/origin. The Knowledge, Risk Analyst, Python and proof-of-concept sample agents are
+not registered or started. Connector callbacks use `OPENBOT_PUBLIC_URL=http://localhost:3010`
+(derived from `APP_PORT` in Compose). Each connector still needs its own account setup.
+`MANAGED_AGENT_AG_UI_URL` is deliberately unset. The installed Mastra
+transport receives the managed token through `PICKED_HARNESS_URL` and uses `MastraClient` and
+`@ag-ui/mastra`. Do not replace this with an AG-UI URL pointing at Mastra's ordinary HTTP API.
+
+The login script stops Mastra, runs the one-shot helper, and starts it again. Its underlying command is:
+
+```bash
+docker compose stop mastra
+docker compose --profile setup run --rm mastra-auth
+docker compose up -d --no-deps mastra
+```
+
+The SDK calls `AuthStorage.login("openai-codex", { authMode: "device", ... })`. No invented CLI
+`--mode` flag is used. The browser approves the short-lived device code; tokens go straight to
+`openbot-local_mastra-auth:/var/lib/mastra/auth.json`. Both containers run as uid/gid 1000 with
+`MASTRA_APP_DATA_DIR=/var/lib/mastra`, a writable directory (0700), private files (0600), and a shared
+`flock` to exclude concurrent writers. The SDK refreshes expired credentials and atomically renames
+its private credential file. One runtime and one shared `AuthStorage` instance avoid refresh races.
+Do not scale Mastra or run a second writer. Exit 73 means the credential lock is held: stop Mastra
+before running the auth service. Never paste OAuth tokens or an existing Codex auth file into `.env`.
+
+`BOT_MODEL` in `.env` selects the subscription model. The initial candidate `gpt-5.6-sol` comes from
+the installed SDK's current provider default; it is not an account entitlement claim. Change it
+only to a model your account can generate with, recreate Mastra, and run `verify.sh` again. `/health`
+is unauthenticated process liveness. `/ready` requires the internal token and checks login/refresh;
+it does not spend allowance or prove model entitlement. `/verify` makes a real streamed generation
+inside the running service and reports success only after receiving the expected text. Missing or
+revoked login: rerun `login.sh`. Exhausted allowance: check ChatGPT usage and wait for availability;
+repeated sign-in does not replenish it. Generation failure can also mean unavailable model access.
+**No OpenAI Platform key, separately billed API fallback, or subscription token used as an API key.**
+Compose passes no API key to Mastra and empties API keys in the server. Auxiliary API model calls
+for intent routing/tool narrowing are explicitly disabled; their existing deterministic defaults
+remain in use. Voice, dictation and optional connector credentials are not configured.
+
+Compose owns `server` (UI/API), `worker` (routine dispatch), `maintenance` (staged-attachment cleanup),
+`postgres`, `migrate`, `mastra`, credential-volume initialization, and `supervisor`. The existing
+supervisor creates per-Bot computer containers from the source-built `agent-computer` image.
+`start.sh` explicitly builds that image; its Compose service is behind the `images` profile and need
+not run a redundant shared computer. Computer workspaces and Chromium profiles use the supervisor's
+existing named volumes. Only the supervisor has the Docker socket. PostgreSQL is isolated from
+Mastra and the computers. Only `127.0.0.1:3010` is published by OpenBot. Generated encryption keys
+and internal service credentials remain in untracked, private `.env` across restarts.
+
+Intelligence is a **separate official CLI-managed k3d/Kubernetes Docker stack**, installed release
+0.15.0 on this machine. It supplies durable threads, realtime delivery, its own PostgreSQL/Redis,
+object storage, dashboard, and Learning services. It is not an invented Compose image. The bootstrap
+uses `local setup --defer-model --no-samples`, then `local connect --approve-connection`. The connector
+copies `CPK_INTELLIGENCE_API_KEY` into OpenBot's `INTELLIGENCE_API_KEY` without printing it, finds the
+official stack's actual Docker port mappings, and attaches only its listeners to the isolated
+`openbot-local_intelligence` network with DNS aliases. It retains CLI loopback URLs for the browser;
+`INTELLIGENCE_CLIENT_GATEWAY_WS_URL` separates browser connections from the private runner URL.
+Rerun `connect-intelligence.py` after an official stack update/recreation. All keys stay server-side.
+
+```bash
+npx --yes copilotkit@4.30.0 local status --json  # ports, dashboard URL and component readiness
+npx --yes copilotkit@4.30.0 local login          # opens local dashboard signed in
+npx --yes copilotkit@4.30.0 local renew          # renew evaluation license; internet/sign-in needed
+```
+
+Conversation history lives in Intelligence. Cross-conversation facts reuse OpenBot's PostgreSQL
+personal memory, its ownership/provenance/review/deletion rules, middleware and four existing tools:
+`remember_personal_fact`, `recall_personal_memory`, `save_observed_memory`, `forget_personal_memory`.
+The local Intelligence evaluation does not include User Memory; OpenBot's existing local fallback
+handles it without embeddings or another memory service. Explicit facts are immediately usable;
+inferred facts keep upstream review behavior. Mastra receives the personal-memory context in its
+instructions as well as the governed tools. Mastra's own in-memory infrastructure warning does not
+mean these stores are volatile: no competing Mastra conversation/memory store is enabled.
+
+The bootstrap creates/reuses the **logical** Learning container `openbot` with the official operator
+CLI. A runtime key cannot create it. OpenBot automatically assigns it and binds **new** threads;
+existing thread assignments remain intact. The existing remote middleware delivers reviewed,
+published skills to Mastra as `OpenBot learned skills` context. Review/publish remains in Intelligence.
+**Learning analysis awaits a separately configured, verified model.** Codex login does not configure
+that service. No paid analysis key is supplied and no local analysis model is assumed to exist.
+If you later have a suitable local OpenAI-compatible model, configure it using the official
+`local setup --model-config /private/model.json`, then verify a real Learning run, review a proposed
+skill, publish it, enable delivery and test a new Bot invocation. Until then, thread persistence and
+personal memory work independently; analysis and publication are not claimed as tested.
+The installed local 0.15.0 Inspector Learning endpoint currently returns HTTP 503, even though
+thread ingestion and the empty published revision work. Its cause is not established. The operator
+CLI can inspect bound threads with `npx --yes copilotkit@4.30.0 learning threads list openbot --json`.
+OpenBot Admin reports this Inspector failure explicitly; see the verification record.
+
+Verification and diagnostics:
+
+```bash
+docker compose ps
+./scripts/local/verify.sh                  # real subscription generation + governed browser smoke
+python3 scripts/local/smoke.py --journey    # saves unique fact, restarts, recalls, forgets; four NEW threads
+./scripts/local/test.sh --database         # focused contracts + typecheck + dedicated DB regressions
+docker compose logs --tail=100 server mastra worker supervisor
+```
+
+The journey spends subscription allowance, calls the actual governed memory tools, and compares
+completed Intelligence history across restart. It leaves test conversations in history. A failure
+before forgetting can leave its harmless test fact: remove the verification badge in
+`/capabilities/memory`. Do not count a health check, synthetic provider test, or model list as a real
+subscription-generation pass. See [local/VERIFICATION.md](local/VERIFICATION.md) for the recorded results.
+
+Normal lifecycle preserves all volumes:
+
+```bash
+./scripts/local/stop.sh                         # stops app services AND supervisor-owned computers
+npx --yes copilotkit@4.30.0 local stop           # stops Intelligence; keeps its data
+npx --yes copilotkit@4.30.0 local start
+./scripts/local/start.sh
+# Application-only restart while Intelligence stays running:
+docker compose restart
+```
+
+`docker compose stop` alone does not stop supervisor-created computers; use `stop.sh` for a full
+OpenBot stop. Avoid `docker compose down` during ordinary operation because the official Intelligence
+listeners are attached to its private network; `stop` is sufficient. `start.sh` restores network
+attachments. Runtime readiness failures do not kill the liveness probe and trigger restart loops.
+If the server refuses to start, check Intelligence has been connected, `.env` has both runtime key
+names mapped, and the private endpoint mapping still exists. Re-running `init.py` preserves secrets.
+
+Back up **both** stacks. Store backups outside git, privately, because they contain personal facts,
+browser sessions, and refresh credentials. For OpenBot, stop the worker/server/Mastra and computers
+with `stop.sh`, start only PostgreSQL if necessary, and dump:
+
+```bash
+mkdir -p local/private/backups
+chmod 700 local/private local/private/backups
+(umask 077; docker compose exec -T postgres pg_dump -U openbot -Fc openbot > local/private/backups/openbot.dump)
+```
+
+Also securely copy `.env`, archive the `openbot-local_mastra-auth` volume, and all volumes selected
+by `docker volume ls --filter label=openbot.namespace=openbot-local` (workspace/profile volumes).
+The encryption key is required to decrypt restored credentials. Restore the database into a stopped
+compatible stack with `pg_restore`, restore volumes with numeric ownership, and retain `.env`.
+For Intelligence, stop its stack and separately snapshot its k3d node's persistent mounts, especially
+`/var/lib/rancher/k3s` (including local-path PVC data), plus the private CLI stack/config directory.
+Use `docker inspect <node>` to identify the actual volume names; these are not OpenBot's Compose
+PostgreSQL volume. A host/volume snapshot of the stopped official stack is preferable to copying a
+live database directory. Preserve the official CLI metadata and license/sign-in files securely.
+
+Destructive reset is separate: `docker compose down --volumes` deletes OpenBot Compose database and
+auth volumes, but not supervisor-owned computer volumes or the official Intelligence stack. Computer
+reset in Admin deletes that Bot's workspace/profile. `npx --yes copilotkit@4.30.0 local delete`
+separately deletes Intelligence after its confirmation. Do not run these for normal restarts.
+
+The remaining external dependencies are ChatGPT subscription inference/OAuth, and CopilotKit sign-in,
+release downloads and periodic local evaluation license renewal. There is no managed Intelligence
+hosting configured. Optional analysis/API models and connectors can carry their own costs only if
+you explicitly configure them.
+
+---
+
 <div align="center">
 
 # OpenBot

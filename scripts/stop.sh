@@ -19,6 +19,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+if [ -f "$ROOT/local/versions.json" ]; then
+  exec bash "$ROOT/scripts/local/stop.sh" "$@"
+fi
 
 KEEP_COMPUTERS=false
 for arg in "$@"; do

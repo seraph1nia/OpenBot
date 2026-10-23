@@ -13,3 +13,7 @@ app/dist
 *.log
 .DS_Store
 assets/*.svg
+.copilotkit
+local/private
+**/.mastra
+**/auth.json

@@ -36,6 +36,8 @@ COPY toolkit toolkit
 # `server/src/tenant-package`, so the app cannot be built without it.
 COPY server server
 COPY examples examples
+COPY local/tenant local/tenant
+ENV TENANT_PACKAGE_DIR=../local/tenant
 RUN bun run --cwd app build
 
 
@@ -52,12 +54,16 @@ COPY --from=deps /app/node_modules node_modules
 COPY --from=deps /app/package.json package.json
 COPY --from=deps /app/bun.lock bun.lock
 COPY --from=deps /app/server/node_modules server/node_modules
+COPY --from=deps /app/worker/node_modules worker/node_modules
 COPY --from=deps /app/toolkit/node_modules toolkit/node_modules
 
 COPY server server
 COPY shared shared
 COPY toolkit toolkit
 COPY examples examples
+COPY local/tenant local/tenant
+COPY worker worker
+COPY agent-computer/src agent-computer/src
 
 # The built app, served by the process below. `APP_DIST_DIR` is what turns that on, so an image
 # without this layer is still a working API.

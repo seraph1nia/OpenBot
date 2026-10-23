@@ -1,5 +1,12 @@
 # Deployment
 
+This checkout defaults to the source-based subscription deployment in the root
+[README](../README.md#local-openbot-with-a-chatgpt-subscription). Its Compose stack
+includes the UI/API, routine worker, migrations, maintenance, PostgreSQL, Mastra,
+and the existing computer supervisor. Intelligence is installed separately by the
+official local CLI. `scripts/start.sh` and `scripts/stop.sh` dispatch to that setup.
+The one-container and host-development instructions below describe upstream alternatives.
+
 OpenBot ships as one container. It carries the app, the API that serves it, and the browser the Bots
 drive, and it can carry its own PostgreSQL as well. It does what it does on a laptop.
 

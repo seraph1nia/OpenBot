@@ -1,0 +1,16 @@
+{
+  "openbotRepository": "https://github.com/CopilotKit/OpenBot",
+  "openbotCommit": "bd4dc94943a9d62aefd05e5e99073ba58919c9c6",
+  "copilotkitCli": "4.30.0",
+  "intelligenceRelease": "0.15.0",
+  "bun": "1.4.3",
+  "mastra": {
+    "@ai-sdk/anthropic": "3.0.133",
+    "@ai-sdk/openai": "3.0.130",
+    "@mastra/code-sdk": "1.15.0",
+    "@mastra/core": "1.79.0",
+    "mastra": "1.35.0",
+    "tsx": "4.23.1"
+  },
+  "verificationNote": "Subscription model access is established only by a successful real /verify generation, not the SDK default or model catalog."
+}

@@ -1,0 +1,6 @@
+# Required package schema metadata. No built-in agents are registered and no key is supplied.
+# Auxiliary API inference is disabled by OPENBOT_SUBSCRIPTION_ONLY in Compose.
+model:
+  provider: openai
+  credential_secret_ref: unused-platform-key
+  default_model: unused-subscription-only

@@ -1,5 +1,14 @@
 # Automatic Learning
 
+This checkout's local bootstrap uses the official CopilotKit CLI operator flow to
+create/reuse `openbot`. Live new-thread binding and ingestion were verified. The local
+stack is configured with `--defer-model`: analysis awaits a separate model and does
+not use Mastra's Codex credentials. The installed 0.15.0 Inspector Learning projection
+returns HTTP 503; the operator CLI still lists bound threads and the runtime loads
+the empty revision successfully. See [the verification record](../local/VERIFICATION.md)
+and the root README for the precise tested limits. Published guidance delivery remains
+on the existing reviewed/published-snapshot path.
+
 Open **Admin → Automatic Learning** to choose which Bots contribute completed conversations to a CopilotKit Intelligence Learning container and receive its published skills. Learning defaults on for managed and self-hosted deployments; a saved off setting is preserved. Collection and delivery require an existing, assigned container. OpenBot still starts and chats without one.
 
 Out of the box, OpenBot assigns that container itself: when nothing is saved in Admin and no container is named in the environment, the server makes its Intelligence project's `openbot` container the default as soon as that container exists. See [Automatic assignment](#automatic-assignment).

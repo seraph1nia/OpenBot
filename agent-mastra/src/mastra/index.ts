@@ -21,6 +21,11 @@ import {
   botSettings,
   providerSpec,
 } from "../../../shared/model-providers";
+import {
+  subscriptionModel,
+  subscriptionModelId,
+  subscriptionReadiness,
+} from "../subscription";
 
 /** The providers this Bot can drive: the ones whose SDK modules it loads below. */
 const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
@@ -36,6 +41,7 @@ const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
  * below and answer with a model the deployment never chose.
  */
 async function buildModel() {
+  if (process.env.BOT_PROVIDER === "openai-codex") return subscriptionModel();
   const settings = botSettings("agent-mastra");
   const providerName = settings.provider;
   const spec = providerSpec(providerName);
@@ -87,6 +93,7 @@ const OPENBOT_CONTEXT_DESCRIPTIONS = [
   "OpenBot standing role",
   "OpenBot granted tools guidance",
   "OpenBot learned skills",
+  "OpenBot personal memory",
 ] as const;
 
 type OpenBotInstructionArgs = {
@@ -166,10 +173,87 @@ export const mastra = new Mastra({
         if (!carriesTheServerToken(context.req.raw)) {
           return context.json({ error: "unauthorised" }, 401);
         }
+        // Fail before starting a streamed turn when login is missing. The native
+        // client can then surface an actionable HTTP error instead of an opaque
+        // serialized provider error embedded halfway through a stream.
+        if (
+          process.env.BOT_PROVIDER === "openai-codex" &&
+          context.req.method === "POST" &&
+          /^\/api\/agents\/[^/]+\/(?:stream|generate|resume-stream)$/.test(
+            new URL(context.req.url).pathname,
+          )
+        ) {
+          const status = await subscriptionReadiness();
+          if (!status.ok) {
+            return context.json(
+              {
+                error:
+                  "Codex subscription sign-in required. Run ./scripts/local/login.sh in your terminal, approve the device code, then retry.",
+                code: "OPENBOT_MODEL_AUTH_REQUIRED",
+              },
+              401,
+            );
+          }
+        }
         return next();
       },
     ],
     apiRoutes: [
+      registerApiRoute("/ready", {
+        method: "GET",
+        handler: async (context) => {
+          try {
+            const status = await subscriptionReadiness();
+            return context.json(status, status.ok ? 200 : 503);
+          } catch {
+            return context.json(
+              {
+                ok: false,
+                reason: "credential_store_unavailable",
+                recovery: "Run scripts/local/login.sh",
+              },
+              503,
+            );
+          }
+        },
+      }),
+      registerApiRoute("/verify", {
+        method: "POST",
+        handler: async (context) => {
+          try {
+            const status = await subscriptionReadiness();
+            if (!status.ok) return context.json(status, 503);
+            const result = await openbot.stream(
+              "Reply with exactly OPENBOT_CODEX_OK.",
+              { maxSteps: 1 },
+            );
+            let text = "";
+            let chunks = 0;
+            for await (const chunk of result.textStream) {
+              text += chunk;
+              chunks++;
+            }
+            if (!text.includes("OPENBOT_CODEX_OK"))
+              throw new Error("verification failed");
+            return context.json({
+              ok: true,
+              model: subscriptionModelId,
+              streamedChunks: chunks,
+              inferenceVerified: true,
+            });
+          } catch {
+            return context.json(
+              {
+                ok: false,
+                reason: "generation_failed",
+                recovery:
+                  "Check ChatGPT usage allowance and BOT_MODEL access; re-login with scripts/local/login.sh if revoked. No API fallback is enabled.",
+              },
+              503,
+            );
+          }
+        },
+      }),
       registerApiRoute("/health", {
         method: "GET",
         handler: async (context) =>

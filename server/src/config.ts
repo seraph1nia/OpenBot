@@ -36,6 +36,8 @@ export type RuntimeCapabilities = {
 export type IntelligenceSettings = {
   apiUrl: string;
   gatewayWsUrl: string;
+  /** Browser origin when the API reaches Intelligence on a private Docker network. */
+  clientGatewayWsUrl?: string;
   apiKey: string;
   licenseToken?: string;
 };
@@ -972,6 +974,7 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
     apiUrl: url(environment, "INTELLIGENCE_API_URL"),
     gatewayWsUrl: url(environment, "INTELLIGENCE_GATEWAY_WS_URL"),
+    clientGatewayWsUrl: url(environment, "INTELLIGENCE_CLIENT_GATEWAY_WS_URL"),
     apiKey: optional(environment, "INTELLIGENCE_API_KEY"),
     licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
   };

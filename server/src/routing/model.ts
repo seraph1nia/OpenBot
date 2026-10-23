@@ -13,6 +13,11 @@ export function createModelCompleter(deps: {
   resolveApiKey: () => Promise<string | null>;
 }): (prompt: string, signal?: AbortSignal) => Promise<string> {
   return async (prompt: string, signal?: AbortSignal) => {
+    if (process.env.OPENBOT_SUBSCRIPTION_ONLY === "true") {
+      throw new Error(
+        "Auxiliary API inference is disabled in subscription-only mode",
+      );
+    }
     signal?.throwIfAborted();
     const key = await deps.resolveApiKey();
     signal?.throwIfAborted();

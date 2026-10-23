@@ -1,5 +1,14 @@
 # Configuration
 
+For this checkout's default subscription deployment, use the root
+[README](../README.md#local-openbot-with-a-chatgpt-subscription) and `.env.example`.
+`scripts/local/init.py` generates persistent local secrets. Compose fixes
+`BOT_PROVIDER=openai-codex`, omits model API keys, selects `local/tenant`, and disables
+auxiliary API inference with `OPENBOT_SUBSCRIPTION_ONLY=true`. The connector maps
+CLI credentials to `INTELLIGENCE_API_KEY` and sets private Docker API/gateway URLs.
+`INTELLIGENCE_CLIENT_GATEWAY_WS_URL` is the optional browser-facing WebSocket origin;
+the existing gateway setting continues to address the server-side runner.
+
 OpenBot is configured with environment variables and a tenant package. The API server validates both at startup.
 
 ## Environment setup

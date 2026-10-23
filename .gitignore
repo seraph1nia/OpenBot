@@ -53,3 +53,13 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Local subscription deployment and private CLI/verification artifacts
+.env
+.env.*
+!.env.example
+.copilotkit/
+local/private/
+agent-mastra/.mastra/
+agent-mastra/.env
+.copilotkit/local.json

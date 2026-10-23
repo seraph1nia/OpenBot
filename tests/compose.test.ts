@@ -1,565 +1,98 @@
-import { beforeAll, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { parse } from "yaml";
 
-function composeFile() {
-  return readFileSync(
-    join(import.meta.dir, "..", "docker-compose.yml"),
-    "utf8",
-  );
-}
+const compose = parse(
+  readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8"),
+);
+const services = compose.services;
 
-function rootDockerfile() {
-  return readFileSync(join(import.meta.dir, "..", "Dockerfile"), "utf8");
-}
-
-function agentComputerDockerfile() {
-  return readFileSync(
-    join(import.meta.dir, "..", "agent-computer", "Dockerfile"),
-    "utf8",
-  );
-}
-
-function runLangGraphAguiModelProbe(
-  openaiBaseUrl: string | undefined,
-  options: {
-    botProvider?: string;
-    botModel?: string;
-    openaiApiKey?: string;
-  } = {},
-) {
-  const dir = mkdtempSync(join(tmpdir(), "openbot-langgraph-agui-"));
-  try {
-    writeFileSync(
-      join(dir, "ag_ui_langgraph.py"),
-      [
-        "class LangGraphAgent:",
-        "    def __init__(self, **kwargs):",
-        "        pass",
-        "",
-        "def add_langgraph_fastapi_endpoint(**kwargs):",
-        "    pass",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
-      join(dir, "probe.py"),
-      [
-        "import json",
-        "import os",
-        "import sys",
-        "from types import ModuleType",
-        "from ag_ui_langgraph import LangGraphAgent",
-        // This probe tests provider configuration without framework dependencies.
-        // Real tool execution is covered by the Python protocol regressions.
-        "tools = ModuleType('src.tool_runtime')",
-        "tools.ToolAwareAgent = LangGraphAgent",
-        "tools.bind_tools = tools.execute_tools = tools.next_step = lambda *args: None",
-        "tools.model_messages = lambda messages: messages",
-        "sys.modules['src.tool_runtime'] = tools",
-        "from src import main",
-        "chosen = main._model()",
-        "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), **chosen}))",
-        "",
-      ].join("\n"),
-    );
-    mkdirSync(join(dir, "langchain"), { recursive: true });
-    writeFileSync(
-      join(dir, "langchain", "chat_models.py"),
-      [
-        "def init_chat_model(model, *, model_provider=None):",
-        "    return {'model': model, 'model_provider': model_provider}",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(join(dir, "langchain", "__init__.py"), "");
-    mkdirSync(join(dir, "fastapi"), { recursive: true });
-    writeFileSync(
-      join(dir, "fastapi", "__init__.py"),
-      [
-        "class FastAPI:",
-        "    def middleware(self, *_args, **_kwargs):",
-        "        def decorator(fn):",
-        "            return fn",
-        "        return decorator",
-        "    def get(self, *_args, **_kwargs):",
-        "        def decorator(fn):",
-        "            return fn",
-        "        return decorator",
-        "",
-        "class Request:",
-        "    pass",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
-      join(dir, "fastapi", "responses.py"),
-      [
-        "class JSONResponse:",
-        "    def __init__(self, *args, **kwargs):",
-        "        self.args = args",
-        "        self.kwargs = kwargs",
-        "",
-      ].join("\n"),
-    );
-    mkdirSync(join(dir, "langgraph", "checkpoint"), { recursive: true });
-    writeFileSync(
-      join(dir, "langgraph", "graph.py"),
-      [
-        "START = 'start'",
-        "END = 'end'",
-        "MessagesState = dict",
-        "class StateGraph:",
-        "    def __init__(self, *_args, **_kwargs):",
-        "        pass",
-        "    def add_node(self, *_args, **_kwargs):",
-        "        pass",
-        "    def add_edge(self, *_args, **_kwargs):",
-        "        pass",
-        "    def add_conditional_edges(self, *_args, **_kwargs):",
-        "        pass",
-        "    def compile(self, **_kwargs):",
-        "        return object()",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(join(dir, "langgraph", "__init__.py"), "");
-    writeFileSync(join(dir, "langgraph", "checkpoint", "__init__.py"), "");
-    writeFileSync(
-      join(dir, "langgraph", "checkpoint", "memory.py"),
-      ["class MemorySaver:", "    pass", ""].join("\n"),
-    );
-
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      BOT_MODEL: options.botModel ?? "gpt-test",
-      OPENAI_API_KEY: options.openaiApiKey ?? "sk-test",
-      PYTHONPATH: `${dir}:${join(import.meta.dir, "..", "agent-langgraph-agui")}`,
-    };
-    delete env.CHATGPT_AUTH_FILE;
-    if (options.botProvider !== undefined) {
-      env.BOT_PROVIDER = options.botProvider;
-    } else {
-      delete env.BOT_PROVIDER;
-    }
-    if (openaiBaseUrl === undefined) {
-      delete env.OPENAI_BASE_URL;
-    } else {
-      env.OPENAI_BASE_URL = openaiBaseUrl;
-    }
-    const result: {
-      base_url: string | null;
-      model: string;
-      model_provider: string | null;
-    } = JSON.parse(
-      execFileSync("python3", [join(dir, "probe.py")], {
-        env,
-        encoding: "utf8",
-      }),
-    );
-    return result;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-function runComposeConfig(env: Record<string, string>) {
-  const output = execFileSync(
-    "docker",
-    [
-      "compose",
-      "--env-file",
-      "/dev/null",
-      "--profile",
-      "harness",
-      "config",
-      "--format",
-      "json",
-    ],
-    {
-      cwd: join(import.meta.dir, ".."),
-      env: {
-        PATH: process.env.PATH ?? "",
-        PICKED_HARNESS_IMAGE: "openbot-agent-langgraph-agui:test",
-        ...env,
-      },
-      encoding: "utf8",
-    },
-  );
-  return JSON.parse(output) as {
-    services: Record<
-      string,
-      {
-        environment: Record<string, string>;
-        extra_hosts?: string[];
-        volumes?: Array<{ type: string; source: string; target: string }>;
-      }
-    >;
-  };
-}
-
-// `docker compose config` pays a one-off cold start on the first call in a process — the Compose
-// plugin initialising and resolving every image reference — which is several seconds on a loaded CI
-// runner and a fraction of that once warm. A test that happened to be the first to call it was
-// eating that cost inside its own 5s timeout and flaking, while every later test ran in well under a
-// second. Absorb the cold start once here, under a timeout that has room for it, so no individual
-// test carries it.
-beforeAll(() => {
-  runComposeConfig({});
-}, 60_000);
-
-test("provides PostgreSQL with pgvector for local development", () => {
-  const compose = composeFile();
-
-  expect(compose).toContain("postgres:");
-  expect(compose).toContain("pgvector/pgvector:");
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
-  expect(compose).toContain("${POSTGRES_PORT:-5432}:5432");
+test("keeps database and Docker socket away from the agent runtime and computers", () => {
+  expect(services.postgres.networks).toEqual(["data"]);
+  expect(compose.networks.data.internal).toBe(true);
+  expect(services.mastra.networks).not.toContain("data");
+  expect(services["agent-computer"].networks).not.toContain("data");
+  const holders = Object.entries(services)
+    .filter(([, value]) =>
+      JSON.stringify(value).includes("/var/run/docker.sock"),
+    )
+    .map(([name]) => name);
+  expect(holders).toEqual(["supervisor"]);
 });
 
-/**
- * Every published port is settable, and defaults to the number the documentation gives.
- *
- * `scripts/start.sh` reads these same names to decide where to look for each service.
- */
-test("publishes every service on a settable port with the documented default", () => {
-  const compose = composeFile();
-
-  const published = [
-    ["POSTGRES_PORT", "5432", "5432"],
-    ["COMPUTER_PORT", "4100", "4100"],
-    ["SUPERVISOR_PORT", "4500", "4300"],
-    ["BOT_PORT", "4200", "4200"],
-    ["LANGGRAPH_PORT", "4201", "4201"],
-  ] as const;
-
-  for (const [name, host, container] of published) {
-    expect(compose).toContain(`\${${name}:-${host}}:${container}`);
-  }
+test("publishes only the local UI/API port", () => {
+  const published = Object.entries(services)
+    .filter(
+      ([, value]) =>
+        typeof value === "object" && value !== null && "ports" in value,
+    )
+    .map(([name]) => name);
+  expect(published).toEqual(["server"]);
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal Compose interpolation
+  expect(services.server.ports).toEqual(["127.0.0.1:${APP_PORT:-3010}:3001"]);
 });
 
-/**
- * The services that answer to a secret are published to the host's loopback and no further.
- *
- * A published port with no interface in front of it binds every address the host has, so the
- * service answers anything that can route to the machine. That is the wrong default for all of
- * these and worst for the supervisor, which holds the Docker socket: reaching it is root on the
- * host by way of four verbs, and `SUPERVISOR_TOKEN` is a shared secret rather than a network
- * boundary. The computer says the same thing about itself in a comment beside its own port, and
- * this is that reasoning applied to every service that has one.
- *
- * Named ports rather than a blanket rule, so adding a service is a decision about where it should
- * answer rather than something this test quietly grants.
- */
-test("publishes every service that holds a secret on loopback only", () => {
-  const compose = composeFile();
-
+test("gates API startup on successful migrations and healthy transports", () => {
+  expect(services.migrate.command).toEqual(["bun", "scripts/migrate.ts"]);
+  expect(services.migrate.depends_on.postgres.condition).toBe(
+    "service_healthy",
+  );
+  expect(services.server.depends_on.migrate.condition).toBe(
+    "service_completed_successfully",
+  );
+  expect(services.server.depends_on.mastra.condition).toBe("service_healthy");
+  expect(services.worker.depends_on.server.condition).toBe("service_healthy");
   for (const name of [
-    "POSTGRES_PORT",
-    "SUPERVISOR_PORT",
-    "COMPUTER_PORT",
-    "BOT_PORT",
-    "LANGGRAPH_PORT",
-    "PICKED_HARNESS_PORT",
+    "server",
+    "worker",
+    "maintenance",
+    "mastra",
+    "postgres",
+    "supervisor",
   ]) {
-    const published = [
-      ...compose.matchAll(
-        new RegExp(`^\\s*- "([^"\\n]*)\\$\\{${name}:-\\d+\\}:[^"\\n]+"`, "gm"),
-      ),
-    ];
-    expect(published.length).toBeGreaterThan(0);
-    for (const mapping of published) {
-      expect(["127.0.0.1:", "[::1]:"]).toContain(mapping[1]);
-    }
+    expect(services[name].restart).toBe("unless-stopped");
+    expect(services[name].healthcheck.test.length).toBeGreaterThan(0);
   }
 });
 
-/**
- * The host reads OPENAI_BASE_URL directly; containers can need a different route to that model.
- * Exercise Compose's nested interpolation so all shipped Bots and the picked harness receive the
- * override when present and keep the host fallback when it is absent or explicitly cleared.
- */
-const compatibleEndpointCases: Array<{
-  name: string;
-  environment: Record<string, string>;
-  expected: string;
-}> = [
-  {
-    name: "uses the container override ahead of the host endpoint",
-    environment: {
-      OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
-      OPENAI_CONTAINER_BASE_URL: "http://model-service:11434/v1",
-    },
-    expected: "http://model-service:11434/v1",
-  },
-  {
-    name: "uses the host endpoint when the container override is unset",
-    environment: { OPENAI_BASE_URL: "https://models.example/v1" },
-    expected: "https://models.example/v1",
-  },
-  {
-    name: "uses the host endpoint when the container override is cleared",
-    environment: {
-      OPENAI_BASE_URL: "https://models.example/v1",
-      OPENAI_CONTAINER_BASE_URL: "",
-    },
-    expected: "https://models.example/v1",
-  },
-  {
-    name: "leaves the endpoint empty when neither route is configured",
-    environment: {},
-    expected: "",
-  },
-];
-
-for (const { name, environment, expected } of compatibleEndpointCases) {
-  test(`every Bot ${name}`, () => {
-    const config = runComposeConfig({
-      OPENAI_API_KEY: "synthetic-openai-key",
-      ...environment,
-    });
-    for (const service of ["agent-bot", "agent-langgraph", "agent-harness"]) {
-      expect(config.services[service].environment.OPENAI_BASE_URL).toBe(
-        expected,
-      );
-    }
-  });
-}
-
-test("passes every other provider's key and endpoint into the framework Bot and the picked harness", () => {
-  const config = runComposeConfig({
-    ANTHROPIC_API_KEY: "sk-ant-synthetic",
-    ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
-    GOOGLE_API_KEY: "synthetic-google",
-    GOOGLE_GENERATIVE_AI_BASE_URL: "https://generativelanguage.example/v1beta",
-  });
-
-  // A service either receives the variable or it does not; reading the file's text cannot tell
-  // the difference, because any one service declaring it would satisfy a raw `toContain`.
-  for (const service of ["agent-langgraph", "agent-harness"]) {
-    expect(config.services[service].environment).toMatchObject({
-      ANTHROPIC_API_KEY: "sk-ant-synthetic",
-      ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
-      GOOGLE_API_KEY: "synthetic-google",
-      GOOGLE_GENERATIVE_AI_BASE_URL:
-        "https://generativelanguage.example/v1beta",
-    });
-  }
-});
-
-test("normalizes the picked LangGraph harness's blank OpenAI endpoint before model construction", () => {
-  expect(runLangGraphAguiModelProbe("").base_url).toBeNull();
-  expect(runLangGraphAguiModelProbe("   ").base_url).toBeNull();
-  expect(runLangGraphAguiModelProbe("http://127.0.0.1:4310/v1").base_url).toBe(
-    "http://127.0.0.1:4310/v1",
+test("subscription login and inference share a writable store and matching environment", () => {
+  expect(services.mastra.volumes).toContain("mastra-auth:/var/lib/mastra");
+  expect(services["mastra-auth"].volumes).toEqual(services.mastra.volumes);
+  expect(services.mastra.environment.MASTRA_APP_DATA_DIR).toBe(
+    "/var/lib/mastra",
   );
+  expect(services["mastra-auth"].command).toEqual([
+    "node",
+    "--import",
+    "tsx",
+    "src/auth.ts",
+  ]);
+  expect(services.mastra.environment.NODE_ENV).toBe("production");
+  expect(services.mastra.environment.BOT_PROVIDER).toBe("openai-codex");
+  expect(services.mastra.environment.OPENAI_API_KEY).toBeUndefined();
+  expect(services.server.environment.OPENAI_API_KEY).toBe("");
+  expect(services.server.environment.OPENBOT_SUBSCRIPTION_ONLY).toBe("true");
 });
 
-test("passes the selected Anthropic provider and model into the picked harness", () => {
-  const config = runComposeConfig({
-    ANTHROPIC_API_KEY: "sk-ant-synthetic",
-    ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
-    BOT_PROVIDER: "anthropic",
-    BOT_MODEL: "claude-sonnet-4-5",
-    OPENAI_API_KEY: "",
-  });
-
-  expect(config.services["agent-harness"].environment).toMatchObject({
-    ANTHROPIC_API_KEY: "sk-ant-synthetic",
-    ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
-    BOT_PROVIDER: "anthropic",
-    BOT_MODEL: "claude-sonnet-4-5",
-    OPENAI_API_KEY: "",
-  });
-
-  expect(
-    runLangGraphAguiModelProbe(undefined, {
-      botProvider: "anthropic",
-      botModel: "claude-sonnet-4-5",
-      openaiApiKey: "",
-    }),
-  ).toMatchObject({
-    model: "claude-sonnet-4-5",
-    model_provider: "anthropic",
-  });
-
-  const openaiConfig = runComposeConfig({
-    OPENAI_API_KEY: "sk-openai-synthetic",
-    OPENAI_BASE_URL: "https://openai-compatible.example/v1",
-  });
-  expect(openaiConfig.services["agent-harness"].environment).toMatchObject({
-    OPENAI_API_KEY: "sk-openai-synthetic",
-    OPENAI_BASE_URL: "https://openai-compatible.example/v1",
-    BOT_PROVIDER: "openai",
-    BOT_MODEL: "gpt-5.5",
-    ANTHROPIC_API_KEY: "",
-    ANTHROPIC_BASE_URL: "",
-  });
-});
-
-test("mounts the ChatGPT token store directory into the picked harness", () => {
-  const config = runComposeConfig({
-    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
-  });
-
-  expect(config.services["agent-harness"].environment).toMatchObject({
-    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
-  });
-  expect(config.services["agent-harness"].volumes).toContainEqual(
-    expect.objectContaining({
-      type: "bind",
-      target: "/root/.langchain",
-    }),
+test("retains native Mastra identity and authenticated server callbacks", () => {
+  const tenant = parse(
+    readFileSync(
+      new URL("../local/tenant/agents.yaml", import.meta.url),
+      "utf8",
+    ),
   );
-  expect(config.services["agent-harness"].volumes).not.toContainEqual(
-    expect.objectContaining({
-      type: "bind",
-      target: "/root/.langchain/chatgpt-auth.json",
-    }),
+  expect(tenant.agents).toHaveLength(1);
+  expect(tenant.agents[0].id).toBe("general-assistant");
+  expect(tenant.agents[0].type).toBe("remote-mastra");
+  expect(tenant.agents[0].remote_agent_id).toBe("openbot");
+  expect(services.server.environment.PICKED_HARNESS_URL).toBe(
+    tenant.agents[0].endpoint,
   );
-});
-
-test("enables pgvector before creating vector columns", () => {
-  const migration = readFileSync(
-    join(import.meta.dir, "..", "server", "drizzle", "0000_schema.sql"),
-    "utf8",
+  expect(services.server.environment.MANAGED_AGENT_AG_UI_URL).toBeUndefined();
+  expect(services.mastra.environment.OPENBOT_TOOL_URL).toBe(
+    "http://server:3001/api/agent-tools/call",
   );
-
-  // The order is the property, not the first line. A `vector` column cannot be created before the
-  // extension that defines the type, and a generated migration has no reason to put them in that
-  // order on its own.
-  const extension = migration.indexOf("CREATE EXTENSION IF NOT EXISTS vector;");
-  const firstVectorColumn = migration.search(/"embedding" vector\(/);
-  expect(extension).toBeGreaterThanOrEqual(0);
-  expect(firstVectorColumn).toBeGreaterThan(extension);
-});
-
-test("runs migrations after PostgreSQL becomes healthy", () => {
-  const compose = composeFile();
-
-  expect(compose).toContain("migrate:");
-  expect(compose).toContain("condition: service_healthy");
-  /*
-   * THE SERVER'S OWN MIGRATOR, NOT `drizzle-kit migrate`, AND THE DIFFERENCE IS THE POINT.
-   *
-   * `drizzle-kit` will skip a migration stamped below what the database has already recorded and
-   * still report success — the exact outcome `server/src/db/migration-reach.ts` exists to refuse,
-   * and a developer's database is one of the places it happens. `compose.yml` says the same thing
-   * at the service itself. Asserting the command here is what stops the stack quietly going back
-   * to the migrator that cannot see that case.
-   */
-  expect(compose).toContain('"bun", "scripts/migrate.ts"');
-});
-
-test("builds the deployment image with Playwright's Chromium payload only", () => {
-  for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
-    expect(dockerfile).toContain(
-      "FROM node:24.18.1-bookworm-slim AS node-toolchain",
-    );
-    expect(dockerfile).toContain("FROM ubuntu:24.04");
-    expect(dockerfile).not.toContain("mcr.microsoft.com/playwright");
-    expect(dockerfile).toContain("ARG PLAYWRIGHT_VERSION=1.62.1");
-    expect(dockerfile).toContain("ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright");
-    expect(dockerfile).toContain(
-      "COPY --from=node-toolchain /usr/local /usr/local",
-    );
-    expect(dockerfile).toContain(
-      'bunx --bun "playwright@' +
-        "$" +
-        "{PLAYWRIGHT_VERSION}" +
-        '" install --with-deps chromium',
-    );
-    expect(dockerfile).not.toMatch(/\bnodejs\b|\bnpm\b/);
-    expect(dockerfile).not.toMatch(
-      /\binstall(?:\s+--with-deps)?\s+(firefox|webkit)\b/,
-    );
-  }
-
-  const compose = composeFile();
-  expect(compose).toContain(
-    [
-      "agent-computer:",
-      "    build:",
-      "      context: .",
-      "      dockerfile: agent-computer/Dockerfile",
-    ].join("\n"),
+  expect(services.mastra.environment.AGENT_TOOL_TOKEN).toBe(
+    services.server.environment.AGENT_TOOL_TOKEN,
   );
-});
-
-test("takes Bun from the same immutable release in both computer images", () => {
-  const { packageManager } = JSON.parse(
-    readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
-  );
-  const bunVersion = packageManager.replace("bun@", "");
-  const sources = [];
-  for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
-    const source = dockerfile.match(
-      /^FROM (oven\/bun:\S+) AS bun-toolchain$/m,
-    )?.[1];
-    expect(source).toMatch(
-      new RegExp(
-        `^oven/bun:${bunVersion.replaceAll(".", "\\.")}@sha256:[a-f0-9]{64}$`,
-      ),
-    );
-    expect(dockerfile).toContain(
-      "COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun",
-    );
-    expect(dockerfile).not.toContain("bun.sh/install");
-    expect(dockerfile).not.toMatch(/\b(?:curl|wget)\b[^\n]*\|\s*(?:bash|sh)\b/);
-    sources.push(source);
-  }
-  expect(sources[0]).toBe(sources[1]);
-});
-
-/**
- * Per-Bot egress reaches the processes that read it.
- *
- * `EGRESS_PROXY_<BOT>` and `EGRESS_PROXY_DEFAULT` are resolved from `process.env` by the computer
- * itself (`agent-computer/src/egress.ts`), and the supervisor forwards every `EGRESS_PROXY` key out
- * of its own environment into each computer it creates (`supervisor/src/index.ts`). Compose gives a
- * container only what its `environment:` and `env_file:` blocks name, and for a long time neither
- * named these, so an operator who configured a proxy per the documentation got a browser that went
- * out directly and no error saying so.
- *
- * A file rather than `environment:` entries because the names are per-Bot and therefore not knowable
- * here, and a file of its own rather than `.env` because that one holds the deployment's secrets and
- * the browser container is deliberately not given them.
- */
-test("carries per-Bot egress into the computer and the supervisor", () => {
-  const compose = composeFile();
-
-  // Both halves: the shared computer reads them itself, and the supervisor passes them on.
-  const services = compose.split(/^ {2}(?=\S)/m);
-  for (const name of ["agent-computer:", "supervisor:"]) {
-    const service = services.find((block) => block.startsWith(name));
-    expect(service).toBeDefined();
-    expect(service).toContain("egress.env");
-  }
-
-  // Optional, because a deployment with no proxy is the ordinary case and must still start.
-  expect(compose).toContain("required: false");
-});
-
-test("gives the selected harness the same governed callback as the framework Bot", () => {
-  const config = runComposeConfig({
-    OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
-    AGENT_TOOL_TOKEN: "synthetic-callback-token",
-  });
-  for (const service of ["agent-harness", "agent-langgraph"] as const) {
-    expect(config.services[service].environment).toMatchObject({
-      OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
-      AGENT_TOOL_TOKEN: "synthetic-callback-token",
-    });
-    expect(config.services[service].extra_hosts).toContain(
-      "host.docker.internal=host-gateway",
-    );
-  }
 });

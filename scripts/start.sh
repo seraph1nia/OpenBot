@@ -13,6 +13,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+if [ -f "$ROOT/local/versions.json" ]; then
+  exec bash "$ROOT/scripts/local/start.sh" "$@"
+fi
 LOGS="$ROOT/.logs"
 mkdir -p "$LOGS"
 

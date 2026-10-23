@@ -1,20 +1,22 @@
-# Mastra, as a Bot. Bun and Mastra's own server, because Mastra serves its AG-UI route itself
-# rather than handing back a handler to mount.
-FROM oven/bun:1.4-alpine
-
-WORKDIR /app
-COPY agent-mastra/package.json ./
-RUN bun install
-
-COPY shared/listen-port.ts /shared/listen-port.ts
-COPY shared/model-providers.ts /shared/model-providers.ts
-COPY shared/model-providers.json /shared/model-providers.json
+FROM node:24.18.1-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates util-linux \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app/agent-mastra
+COPY agent-mastra/package.json agent-mastra/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY shared /app/shared
+COPY tsconfig.base.json /app/tsconfig.base.json
 COPY agent-mastra/src ./src
-
-# Built at image time, not at start: `mastra start` runs a bundle, and building on every container
-# start would put a build step in front of a person waiting for a Bot.
-RUN bunx mastra build --dir src/mastra
-
-ENV PORT=4213
+COPY agent-mastra/tsconfig.json ./tsconfig.json
+COPY agent-mastra/entrypoint.sh /usr/local/bin/mastra-entrypoint
+RUN chmod 755 /usr/local/bin/mastra-entrypoint \
+  && mkdir -p /var/lib/mastra && chown node:node /var/lib/mastra \
+  && chmod 700 /var/lib/mastra
+ENV PORT=4213 MASTRA_APP_DATA_DIR=/var/lib/mastra MASTRA_TELEMETRY_DISABLED=true DO_NOT_TRACK=1 NODE_ENV=production BOT_PROVIDER=openai-codex
+# The pinned deployer supports this setting. Resolve every runtime dependency
+# from npm ci's locked tree, rather than its generated second npm install.
+RUN MASTRA_BUILD_SKIP_INSTALL=true npx mastra build --dir src/mastra
+USER node
 EXPOSE 4213
-CMD ["bunx", "mastra", "start"]
+ENTRYPOINT ["mastra-entrypoint"]
+CMD ["node", ".mastra/output/index.mjs"]

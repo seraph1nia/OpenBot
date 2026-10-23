@@ -11,7 +11,6 @@ import { defaultModelFor } from "@openbot/shared/model-providers";
 import {
   BuiltInAgentWithSaneHistory,
   CloningRemoteAgent,
-  IntelligenceKnowingANewThread,
   RunBuiltAgent,
   UnavailableAgent,
 } from "@openbot/toolkit/copilotkit/agents";
@@ -46,6 +45,7 @@ import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
+import { LocallyAddressedIntelligence } from "./intelligence-networking";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
   type AcquireLearnedSkills,
@@ -1745,26 +1745,29 @@ export function mountCopilotRuntime(
    */
   const intelligenceClient: CopilotKitIntelligence =
     observeIntelligenceAuthentication(
-      new IntelligenceKnowingANewThread({
-        apiUrl: intelligence.apiUrl,
-        wsUrl: intelligence.gatewayWsUrl,
-        apiKey: intelligence.apiKey,
-        getLearningContainerId: async ({
-          agentId,
-          input,
-          user,
-        }): Promise<string | undefined> => {
-          if (!user)
-            throw new Error(
-              "Learning Thread assignment requires a verified user.",
-            );
-          return learning?.containerForThread({
+      new LocallyAddressedIntelligence(
+        {
+          apiUrl: intelligence.apiUrl,
+          wsUrl: intelligence.gatewayWsUrl,
+          apiKey: intelligence.apiKey,
+          getLearningContainerId: async ({
             agentId,
-            threadId: input.threadId,
-            userId: user.id,
-          });
+            input,
+            user,
+          }): Promise<string | undefined> => {
+            if (!user)
+              throw new Error(
+                "Learning Thread assignment requires a verified user.",
+              );
+            return learning?.containerForThread({
+              agentId,
+              threadId: input.threadId,
+              userId: user.id,
+            });
+          },
         },
-      }),
+        intelligence.clientGatewayWsUrl,
+      ),
     );
 
   const learning: LearningRuntime | undefined = learningSettings
