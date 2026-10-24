@@ -1496,10 +1496,13 @@ export function serverMethods(context: StoreContext) {
          * account — so an administrator setting Drive up was blocked at "refresh tools" and sent to
          * their personal settings page to grant access, so that a token could be minted and handed to
          * a function that discards it. The gate outlived the reason for it.
+         * A reviewed MCP endpoint may also publish schemas publicly. That exception applies only
+         * to listing; execution still resolves the person's credential through connectionTokenFor.
          */
-        const token = transport.listNeedsCredential
-          ? (await connectionTokenFor(row, entry, actorId, access)).token
-          : undefined;
+        const token =
+          transport.listNeedsCredential && !entry?.publicToolList
+            ? (await connectionTokenFor(row, entry, actorId, access)).token
+            : undefined;
 
         listed = await transport.listTools({
           url: effectiveUrl(row, entry),

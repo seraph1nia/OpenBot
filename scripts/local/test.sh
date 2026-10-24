@@ -6,7 +6,9 @@ npm ci --prefix agent-mastra --no-audit --no-fund
 bun test tests/compose.test.ts agent-mastra/src/subscription.test.ts agent-mastra/src/mastra/index.test.ts \
   server/tests/copilot.test.ts server/tests/memory.test.ts server/tests/memory-runtime.test.ts \
   server/tests/intelligence-networking.test.ts server/tests/mastra-roster.test.ts \
-  server/tests/learning-mastra.test.ts
+  server/tests/learning-mastra.test.ts server/tests/mcp-oauth-discovery.test.ts server/tests/plugin-catalogue.test.ts \
+  server/tests/plugin-oauth.test.ts server/tests/plugin-oauth-callback.test.ts \
+  server/tests/plugin-connect-route.test.ts server/tests/oauth-refresh-redirect.test.ts
 bun run typecheck
 bunx tsc -p agent-mastra/tsconfig.json
 # Optional real PostgreSQL ownership/provenance/review/deletion regressions.

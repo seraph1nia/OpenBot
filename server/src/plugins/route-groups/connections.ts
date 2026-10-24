@@ -14,6 +14,7 @@ import {
   schemeKind,
 } from "../broker";
 import { catalogueEntry } from "../catalogue";
+import { validateMcpOAuthDiscovery } from "../mcp-oauth-discovery";
 import {
   authorizationUrlFor,
   type ConnectOrigin,
@@ -910,6 +911,17 @@ export function mountConnectionRoutes({
       context.req.query("returnTo") === "admin" ? "admin" : "settings";
 
     const verifier = createVerifier();
+    try {
+      await validateMcpOAuthDiscovery(entry.auth);
+    } catch {
+      return context.json(
+        {
+          error:
+            "MCP OAuth discovery failed or the provider configuration changed. Check the connector's setup and retry.",
+        },
+        502,
+      );
+    }
     return context.json({
       authorizationUrl: authorizationUrlFor({
         auth: entry.auth,

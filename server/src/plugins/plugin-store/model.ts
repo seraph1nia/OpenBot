@@ -948,7 +948,10 @@ export async function exchangeRefreshTokenOverHttp(input: {
 
   const response = await fetch(input.tokenUrl, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
+    },
     body: params,
     /*
      * A redirect is a refusal, not a detour to be followed.

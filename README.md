@@ -119,6 +119,13 @@ thread ingestion and the empty published revision work. Its cause is not establi
 CLI can inspect bound threads with `npx --yes copilotkit@4.30.0 learning threads list openbot --json`.
 OpenBot Admin reports this Inspector failure explicitly; see the verification record.
 
+GitHub and Gmail use the official remote MCP servers and the normal **Connections → Connect**
+browser OAuth flow. Register each provider's OAuth client once under its admin connector page,
+then authorize your own account in the browser. GitHub supports repository reads and creating
+issues/branches/PRs. Gmail grants reading/search and **unsent drafts only**. See [GitHub setup](docs/plugins/github.md)
+and [Gmail setup](docs/plugins/gmail.md) for the required provider registrations and Google's
+Workspace MCP preview prerequisite. No PAT-first or custom REST authentication path is used.
+
 Verification and diagnostics:
 
 ```bash

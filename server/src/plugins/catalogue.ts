@@ -18,6 +18,10 @@
  * forgery primitive pointed at the deployment's own network.
  */
 
+import {
+  type ResearchRole,
+  researchRoleOfTool,
+} from "@openbot/shared/research";
 /**
  * How a server is authenticated, and whose credential does it.
  *
@@ -29,12 +33,9 @@
 // The one place browsing and this check agree on: the addresses that hold the deployment's own
 // cloud credentials. `target.ts` imports nothing itself, so asking it here adds no dependency.
 import { isNeverAllowedHostname } from "../computer/target";
+import { GITHUB_INITIAL_WRITE_TOOLS, GITHUB_READ_TOOLS } from "./github-tools";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
 import type { CuratedTransportKind } from "./transport";
-import {
-  type ResearchRole,
-  researchRoleOfTool,
-} from "@openbot/shared/research";
 
 export type CatalogueAuth =
   /** Answers without any credential at all. */
@@ -63,7 +64,9 @@ export type CatalogueAuth =
       authorizationUrl: string;
       tokenUrl: string;
       /** Where a disconnect is sent, so revocation happens at the vendor and not just here. */
-      revokeUrl: string;
+      revokeUrl?: string;
+      /** Discover MCP resource/AS metadata, then validate against the reviewed endpoints. */
+      mcpDiscovery?: { resource: string; authorizationServer: string };
       /**
        * What to ask a person to consent to. Narrow on purpose: a scope granted by everybody who
        * connects and used by nothing is a permission nobody remembers agreeing to. Empty for a
@@ -150,6 +153,8 @@ export type CatalogueEntry = {
    * naming it resolves to a Composio dial with no app and no brokered gate.
    */
   transport?: CuratedTransportKind;
+  /** Reviewed MCP endpoints that publish tool schemas without an account. Calls still authenticate. */
+  publicToolList?: boolean;
   /**
    * The only tools on this server that read, when the vendor's list is too long or moves too fast
    * for {@link CatalogueEntry.writeTools} to be trusted complete.
@@ -214,6 +219,64 @@ const FIRECRAWL_READ_TOOLS = Object.freeze([
  * the other end of it.
  */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
+  {
+    key: "google-gmail",
+    title: "Gmail",
+    vendor: "Google",
+    summary:
+      "Read and search your mail and create unsent drafts. Sending is disabled.",
+    host: "https://gmailmcp.googleapis.com",
+    path: "/mcp/v1",
+    publicToolList: true,
+    auth: {
+      kind: "user-oauth",
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      revokeUrl: "https://oauth2.googleapis.com/revoke",
+      scopes: Object.freeze([
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose",
+      ]),
+      authorizationParams: Object.freeze({
+        access_type: "offline",
+        prompt: "consent",
+      }),
+    },
+    readTools: Object.freeze([
+      "search_threads",
+      "get_message",
+      "get_thread",
+      "list_drafts",
+      "get_draft",
+      "list_labels",
+    ]),
+    writeTools: Object.freeze(["create_draft"]),
+    docsUrl:
+      "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+  },
+  {
+    key: "github-mcp",
+    title: "GitHub Tools",
+    vendor: "GitHub",
+    summary:
+      "Repositories, issues and pull requests through GitHub's official MCP server.",
+    host: "https://api.githubcopilot.com",
+    path: "/mcp/",
+    auth: {
+      kind: "user-oauth",
+      authorizationUrl: "https://github.com/login/oauth/authorize",
+      tokenUrl: "https://github.com/login/oauth/access_token",
+      scopes: Object.freeze(["offline_access"]),
+      mcpDiscovery: {
+        resource: "https://api.githubcopilot.com/mcp",
+        authorizationServer: "https://github.com/login/oauth",
+      },
+    },
+    readTools: GITHUB_READ_TOOLS,
+    writeTools: GITHUB_INITIAL_WRITE_TOOLS,
+    docsUrl:
+      "https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md",
+  },
   {
     key: "parallel",
     title: "Parallel Search",

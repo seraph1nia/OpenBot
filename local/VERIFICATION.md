@@ -34,3 +34,31 @@ badge. It verifies actual memory tool calls and reads saved history after restar
 Mastra production builds use the installed deployer’s verified `MASTRA_BUILD_SKIP_INSTALL=true` setting,
 so generated output resolves against the committed npm-ci dependency tree. No second floating install
 (including generated `typescript: latest`) is performed. The final image passed real generation.
+
+## GitHub and Gmail — standard MCP OAuth, 2026-10-24
+
+Both connectors now use the existing MCP transport and per-person browser Connect/OAuth flow.
+The earlier PAT helper and Gmail REST adapter were removed following review. Their earlier test
+results do not establish the behavior of the final MCP implementation.
+
+- GitHub resource and authorization-server discovery passed live using the installed MCP SDK.
+  Endpoints/issuer/S256 are verified against the reviewed configuration. No account tokens are used
+  during discovery. A registered GitHub App with expiring user tokens remains an operator prerequisite;
+  GitHub's remote MCP provider does not support dynamic client registration.
+- Google Gmail's official MCP initialize and tools/list passed live without credentials. This only
+  verifies public tool metadata, not mailbox access or your Google Cloud preview entitlement.
+- Rebuilt and deployed the API/UI image. The running native transport listed 23 Gmail tools;
+  Personal Assistant has exactly six read grants and create_draft. A mailbox search before consent
+  returned HTTP 403 with the native Connect prompt. GitHub is enabled and awaits account connection
+  before authenticated tool discovery. Both connectors have no OAuth client configured yet.
+- Gmail's allowed grants remain reads and create_draft. Unknown/new tools classify as writes and
+  are never automatically granted. Native per-person credential selection still protects calls.
+- 111 focused discovery/catalogue/OAuth/callback/connect/refresh tests passed; workspace TypeScript
+  checks and focused Biome checks passed. Live GitHub metadata discovery passed again on final source.
+- Real Chromium rendered both admin OAuth-client entries and both personal Connect pages, with the
+  correct localhost callback and no missing-public-URL error. All six long-running services healthy.
+- Browser account consent and real account tool calls remain untested until the provider clients
+  are registered and the user connects. No GitHub write, Gmail draft or email was sent in setup.
+
+See docs/plugins/github.md and docs/plugins/gmail.md. Account connection takes place in the web UI;
+there is no terminal PAT or Google OAuth credential helper.
